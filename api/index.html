@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AI Arena</title>
+<style>
+:root{--bg:#f6f4ef;--fg:#1d1d1b;--card:#fff;--lt:#ecd9b5;--dk:#a97c50;--hl:#f2d94e99;--mut:#6b6a65;--ac:#3b5bdb}
+@media (prefers-color-scheme:dark){:root{--bg:#17171a;--fg:#eee;--card:#222226;--lt:#b9a27c;--dk:#6b5238;--mut:#9a9a9f;--ac:#7c93ff}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,sans-serif}
+main{max-width:480px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:0 0 2px}.sub{color:var(--mut);font-size:13px;margin:0 0 12px}
+.tabs{display:flex;gap:6px;margin-bottom:12px}.tabs span{flex:1;text-align:center;padding:8px 4px;border-radius:10px;background:var(--card);font-size:14px;color:var(--mut);cursor:pointer}
+.tabs .on{background:var(--ac);color:#fff}
+.row{display:flex;gap:8px;margin-bottom:10px}
+label{flex:1;font-size:12px;color:var(--mut)}
+select,input[type=text],input[type=password],textarea{width:100%;box-sizing:border-box;margin-top:2px;padding:9px;border-radius:10px;border:1px solid var(--mut);background:var(--card);color:var(--fg);font:15px system-ui,sans-serif}
+#board{display:grid;grid-template-columns:repeat(8,1fr);width:100%;aspect-ratio:1;border-radius:8px;overflow:hidden;margin:6px 0}
+.sq{display:flex;align-items:center;justify-content:center;font-size:min(8.5vw,38px);line-height:1}
+.l{background:var(--lt)}.d{background:var(--dk)}.h{box-shadow:inset 0 0 0 100px var(--hl)}
+.w{color:#fff;text-shadow:0 0 2px #000,0 0 2px #000}.b{color:#111;text-shadow:0 0 1px #fff8}
+button{padding:11px;border:0;border-radius:10px;background:var(--ac);color:#fff;font-size:15px;flex:1}
+button.g{background:var(--card);color:var(--fg)}button:disabled{opacity:.5}
+#st{font-weight:600;margin:8px 0}
+.card{background:var(--card);border-radius:12px;padding:10px 12px;font-size:13px;color:var(--mut);margin-top:10px}
+.o{color:var(--fg);font-size:14px}
+.chk{background:var(--card);border-radius:10px;padding:6px 10px;margin:8px 0}.chk label{display:block;font-size:14px;color:var(--fg);margin:5px 0}
+#log{max-height:90px;overflow:auto;word-break:break-word}
+details{background:var(--card);border-radius:12px;padding:8px 12px;margin-bottom:12px;font-size:14px}
+</style>
+</head>
+<body>
+<main>
+<h1>♟️ AI Arena</h1>
+<p class="sub">ChatGPT, Grok and OpenRouter working, playing and taking tests.</p>
+
+<details open>
+<summary>Settings</summary>
+<label>Password (your APP_PASSWORD)
+<input type="password" id="pass">
+</label>
+<div id="models"></div>
+<div class="card">Model names can be changed any time. For OpenRouter use the full name, like provider/model.</div>
+</details>
+
+<div class="tabs">
+<span class="on" onclick="tab(0)">Team</span>
+<span onclick="tab(1)">Chess</span>
+<span onclick="tab(2)">Test</span>
+</div>
+
+<div id="v0">
+<label>Your prompt
+<textarea id="tp" rows="3" placeholder="e.g. Plan a 3-day trip to Goa"></textarea>
+</label>
+<div class="chk" id="tg"></div>
+<label>Lead AI (splits the work and writes the final answer)
+<select id="lead"></select>
+</label>
+<div class="row" style="margin-top:10px">
+<button id="tb">Run team</button>
+</div>
+<div id="to"></div>
+</div>
+
+<div id="v1" style="display:none">
+<div class="row">
+<label>White<select id="pw"></select></label>
+<label>Black<select id="pb"></select></label>
+</div>
+<div id="board"></div>
+<div id="st">Ready</div>
+<div class="row">
+<button id="go">Play</button>
+<button class="g" id="step">Step</button>
+<button class="g" id="rs">Reset</button>
+</div>
+<div class="card">
+<b>Score</b> <span id="sc">–</span>
+<div id="log"></div>
+</div>
+<div class="card">Carom and Pool are not built yet. Chess has no castling or en passant, and pawns become queens.</div>
+</div>
+
+<div id="v2" style="display:none">
+<label>Question paper (one question per line)
+<textarea id="qp" rows="5" placeholder="What is 15% of 240?"></textarea>
+</label>
+<div class="chk" id="cg"></div>
+<label>Grader<select id="judge"></select></label>
+<div class="row" style="margin-top:10px">
+<button id="qb">Start test</button>
+<button class="g" id="gb">Grade</button>
+</div>
+<div id="qo"></div>
+<div class="card o" id="qs" style="display:none"></div>
+</div>
+</main>
+
+<script>
+function $(i){return document.getElementById(i)}
+
+var AIS=[
+{n:"ChatGPT",p:"openai",m:"gpt-4o-mini"},
+{n:"Grok",p:"grok",m:"grok-3-mini"},
+{n:"OpenRouter",p:"openrouter",m:"openai/gpt-4o-mini"}
+];
+
+try{
+var sv=JSON.parse(localStorage.getItem("arena")||"{}");
+if(sv.m)sv.m.forEach(function(m,i){if(m)AIS[i].m=m});
+if(sv.pw)$("pass").value=sv.pw
+}catch(e){}
+
+function save(){
+try{
+localStorage.setItem("arena",JSON.stringify({
+pw:$("pass").value,
+m:AIS.map(function(a,i){return $("m"+i).value})
+}))
+}catch(e){}
+}
+
+$("models").innerHTML=AIS.map(function(a,i){
+return '<label>'+a.n+' model<input type="text" id="m'+i+'" value="'+a.m+'"></label>'
+}).join("");
+
+$("models").oninput=$("pass").oninput=save;
+
+function tab(n){
+var t=document.querySelectorAll(".tabs span");
+for(var i=0;i<3;i++){
+$("v"+i).style.display=i==n?"":"none";
+t[i].className=i==n?"on":""
+}
+}
+
+function opts(id,sel){
+$(id).innerHTML=AIS.map(function(a,i){
+return '<option value="'+i+'">'+a.n+'</option>'
+}).join("");
+$(id).value=sel
+}
+
+function boxes(id,on){
+$(id).innerHTML=AIS.map(function(a,i){
+return '<label><input type="checkbox" value="'+i+'"'+
+(on.indexOf(i)>=0?" checked":"")+'> '+a.n+'</label>'
+}).join("")
+}
+
+function picked(id){
+return[].slice.call(
+$(id).querySelectorAll("input:checked")
+).map(function(x){return +x.value})
+}
+
+function add(box,t,x){
+var d=document.createElement("div");
+d.className="card o";
+var b=document.createElement("b");
+b.textContent=t;
+d.appendChild(b);
+d.appendChild(document.createElement("br"));
+var s=document.createElement("span");
+s.textContent=x;
+s.style.whiteSpace="pre-wrap";
+d.appendChild(s);
+$(box).appendChild(d);
+return s
+}
+
+async function call(i,q){
+var r=await fetch("/api/ask",{
+method:"POST",
+headers:{
+"Content-Type":"application/json",
+"x-app-password":$("pass").value
+},
+body:JSON.stringify({
+provider:AIS[i].p,
+model:$("m"+i).value.trim(),
+prompt:q
+})
+});
+
+var j={};
+try{j=await r.json()}catch(e){}
+
+if(!r.ok)
+throw new Error(AIS[i].n+": "+(j.error||"error "+r.status));
+
+return(j.text||"").trim()
+}
+
+function msg(e){
+return"Failed – "+(e&&e.message||"error")
+}
+
+/* TEAM */
+
+$("tb").onclick=async function(){
+var btn=this,
+sel=picked("tg"),
+p=$("tp").value.trim(),
+L=+$("lead").value;
+
+$("to").innerHTML="";
+
+if(!p||!sel.length){
+add("to","Note","Write a prompt and tick at least one AI.");
+return
+}
+
+btn.disabled=true;
+
+try{
+var names=sel.map(function(i){return AIS[i].n}).join(", ");
+
+var pl=await call(L,
+"You lead an AI team. Members: "+names+
+".\nTask: "+p+
+"\nGive each member one short assignment. Reply ONLY with JSON like {\"Member\":\"assignment\"}."
+);
+
+var j={};
+try{j=JSON.parse(pl.match(/\{[\s\S]*\}/)[0])}catch(e){}
+
+add("to",AIS[L].n+" (lead) plan",
+sel.map(function(i){
+return AIS[i].n+": "+(j[AIS[i].n]||"(whole task)")
+}).join("\n"));
+
+var prev="";
+
+for(var k=0;k<sel.length;k++){
+var i=sel[k],
+r=await call(i,
+"Team task: "+p+
+"\nYour assignment: "+(j[AIS[i].n]||p)+
+(prev?"\nNotes from teammates:\n"+prev:"")+
+"\nBe concise (under 150 words)."
+);
+
+add("to",AIS[i].n,r);
+prev+=AIS[i].n+": "+r+"\n"
+}
+
+add("to","Final answer",
+await call(L,
+"Combine these team notes into one final answer for the task: "+
+p+"\n\n"+prev
+));
+
+}catch(e){
+add("to","Error",msg(e))
+}
+
+btn.disabled=false
+};
+
+/* TEST */
+
+var R=[];
+
+$("qb").onclick=async function(){
+var btn=this,
+cs=picked("cg"),
+qs=$("qp").value.split("\n")
+.map(function(x){return x.trim()})
+.filter(Boolean);
+
+$("qo").innerHTML="";
+$("qs").style.display="none";
+R=[];
+
+if(!qs.length||cs.length<2){
+add("qo","Note","Write at least one question and pick 2 or 3 AIs.");
+return
+}
+
+btn.disabled=true;
+
+for(var i=0;i<qs.length;i++){
+var q=qs[i],
+s=add("qo","Q"+(i+1)+". "+q,"Answering…");
+
+var as=await Promise.all(
+cs.map(function(c){
+return call(c,"Answer this exam question:\n"+q).catch(msg)
+})
+);
+
+R.push({q:q,a:as,c:cs});
+
+s.textContent=cs.map(function(c,k){
+return AIS[c].n+": "+as[k]
+}).join("\n\n")
+}
+
+btn.disabled=false
+};
+
+$("gb").onclick=async function(){
+if(!R.length)return;
+
+var btn=this,
+T=R[0].c.map(function(){return 0}),
+s=$("qs");
+
+btn.disabled=true;
+s.style.display="";
+s.textContent="Grading…";
+
+try{
+for(var i=0;i<R.length;i++){
+var r=R[i];
+
+var t=await call(+$("judge").value,
+"Grade these answers to the question: "+r.q+"\n"+
+r.a.map(function(x,k){
+return"Answer "+(k+1)+": "+x
+}).join("\n")+
+"\nGive each answer a score from 0 to 10. Reply ONLY with a JSON array of numbers, one per answer."
+);
+
+JSON.parse(t.match(/\[[\s\S]*?\]/)[0])
+.forEach(function(v,k){T[k]+=+v||0})
+}
+
+s.textContent="Scores (out of "+R.length*10+"): "+
+R[0].c.map(function(c,k){
+return AIS[c].n+" "+T[k]
+}).join(" · ");
+
+}catch(e){
+s.textContent=msg(e)
+}
+
+btn.disabled=false
+};
+
+/* CHESS */
+
+var GL={
+p:"♟",n:"♞",b:"♝",r:"♜",q:"♛",k:"♚"
+};
+
+var N=[
+[1,2],[2,1],[-1,2],[-2,1],
+[1,-2],[2,-1],[-1,-2],[-2,-1]
+];
+
+var K=[
+[1,0],[-1,0],[0,1],[0,-1],
+[1,1],[1,-1],[-1,1],[-1,-1]
+];
+
+var RD=[[1,0],[-1,0],[0,1],[0,-1]];
+var BD=[[1,1],[1,-1],[-1,1],[-1,-1]];
+
+var B,turn,run,last,hist,tok=0,busy=0,over,
+score={w:0,b:0,d:0};
+
+function fen(){
+var s="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR",
+a=[];
+
+for(var i=0;i<s.length;i++){
+var c=s[i];
+
+if(c==="/")continue;
+
+if(c>="1"&&c<="8"){
+for(var k=0;k<+c;k++)a.push("")
+}else{
+a.push(c)
+}
+}
+
+return a
+}
+
+function own(p,c){
+return p&&((p===p.toUpperCase())===(c=="w"))
+}
+
+function gen(b,c){
+var m=[];
+
+for(var i=0;i<64;i++){
+var p=b[i];
+
+if(!own(p,c))continue;
+
+var r=i>>3,
+f=i&7,
+t=p.toLowerCase();
+
+function add2(rr,ff){
+if(rr<0||rr>7||ff<0||ff>7)return 0;
+
+var j=rr*8+ff;
+
+if(!b[j]){
+m.push({f:i,t:j});
+return 1
+}
+
+if(!own(b[j],c))m.push({f:i,t:j});
+
+return 0
+}
+
+if(t=="p"){
+var d=c=="w"?-1:1,
+s=c=="w"?6:1;
+
+if(r+d>=0&&r+d<8&&!b[(r+d)*8+f]){
+m.push({f:i,t:(r+d)*8+f});
+
+if(r==s&&!b[(r+2*d)*8+f]){
+m.push({f:i,t:(r+2*d)*8+f})
+}
+}
+
+[-1,1].forEach(function(x){
+var ff=f+x,
+rr=r+d;
+
+if(ff<0||ff>7||rr<0||rr>7)return;
+
+var q=b[rr*8+ff];
+
+if(q&&!own(q,c))m.push({f:i,t:rr*8+ff})
+})
+
+}else if(t=="n"){
+N.forEach(function(o){
+add2(r+o[0],f+o[1])
+})
+
+}else if(t=="k"){
+K.forEach(function(o){
+add2(r+o[0],f+o[1])
+})
+
+}else{
+var ds=t=="r"?RD:t=="b"?BD:RD.concat(BD);
+
+ds.forEach(function(o){
+var rr=r+o[0],
+ff=f+o[1];
+
+while(add2(rr,ff)){
+rr+=o[0];
+ff+=o[1]
+}
+})
+}
+}
+
+return m
+}
+
+function mv(b,m){
+var n=b.slice(),
+p=n[m.f];
+
+n[m.t]=p;
+n[m.f]="";
+
+if(p.toLowerCase()=="p"&&
+((m.t>>3)==0||(m.t>>3)==7)){
+n[m.t]=p=="P"?"Q":"q"
+}
+
+return n
+}
+
+function chk(b,c){
+var ks=b.indexOf(c=="w"?"K":"k");
+
+if(ks<0)return true;
+
+return gen(b,c=="w"?"b":"w")
+.some(function(m){return m.t==ks})
+}
+
+function legal(b,c){
+return gen(b,c).filter(function(m){
+return !chk(mv(b,m),c)
+})
+}
+
+function sqn(i){
+return"abcdefgh"[i&7]+(8-(i>>3))
+}
+
+function draw(){
+var h="";
+
+for(var i=0;i<64;i++){
+var p=B[i],
+r=i>>3,
+f=i&7;
+
+h+='<div class="sq '+
+((r+f)%2?"d":"l")+
+(last&&(last.f==i||last.t==i)?" h":"")+
+(p?(own(p,"w")?" w":" b"):"")+
+'">'+(p?GL[p.toLowerCase()]:"")+'</div>'
+}
+
+$("board").innerHTML=h;
+$("log").textContent=hist.join(" ");
+
+$("sc").textContent=
+"White "+score.w+" · Black "+score.b+" · Draws "+score.d
+}
+
+function who(c){
+return+$(c=="w"?"pw":"pb").value
+}
+
+function name(c){
+return AIS[who(c)].n+" ("+(c=="w"?"White":"Black")+")"
+}
+
+function stat(t){
+$("st").textContent=t
+}
+
+async function ask(ms){
+var mm=ms.map(function(m){
+return sqn(m.f)+sqn(m.t)
+}),
+rnd=ms[Math.random()*ms.length|0];
+
+try{
+var rows=[];
+
+for(var r=0;r<8;r++){
+rows.push(
+(8-r)+" "+
+B.slice(r*8,r*8+8).map(function(x){
+return x||"."
+}).join(" ")
+)
+}
+
+var q=
+"You are playing chess as "+(turn=="w"?"White":"Black")+
+". Board, rank 8 at top (uppercase = White, lowercase = Black, . = empty):\n"+
+rows.join("\n")+
+"\n  a b c d e f g h\n"+
+"Moves so far: "+(hist.join(" ")||"none")+
+"\nLegal moves: "+mm.join(" ")+
+"\nPick the best move. Reply with ONLY one move from the legal list, nothing else.";
+
+var t=((await call(who(turn),q))
+.toLowerCase().match(/[a-h][1-8][a-h][1-8]/g))||[];
+
+for(var i=0;i<t.length;i++){
+var k=mm.indexOf(t[i]);
+
+if(k>=0)return ms[k]
+}
+
+hist.push("(invalid reply, random move)");
+return rnd
+
+}catch(e){
+hist.push("("+(e.message||"error")+", random move)");
+return rnd
+}
+}
+
+async function step(){
+if(over||busy)return false;
+
+var t0=tok,
+ms=legal(B,turn);
+
+if(!ms.length||hist.length>=300){
+over=1;
+run=0;
+
+if(ms.length||!chk(B,turn)){
+score.d++;
+stat(ms.length?"Draw (move limit)":"Draw – stalemate")
+}else{
+var w=turn=="w"?"b":"w";
+score[w]++;
+stat("Checkmate! "+name(w)+" wins")
+}
+
+sync();
+draw();
+
+return false
+}
+
+busy=1;
+stat(name(turn)+" is thinking…");
+
+var m=await ask(ms);
+
+busy=0;
+
+if(t0!=tok)return false;
+
+B=mv(B,m);
+last=m;
+hist.push(sqn(m.f)+sqn(m.t));
+turn=turn=="w"?"b":"w";
+
+stat(name(turn)+" to move"+(chk(B,turn)?" (check)":""));
+
+draw();
+
+return true
+}
+
+function loop(){
+var t=tok;
+
+if(!run)return;
+
+setTimeout(function(){
+if(t!=tok||!run)return;
+
+step().then(function(ok){
+if(ok)loop()
+})
+},300)
+}
+
+function sync(){
+$("go").textContent=run?"Pause":"Play"
+}
+
+function reset(){
+tok++;
+run=0;
+over=0;
+busy=0;
+B=fen();
+turn="w";
+last=null;
+hist=[];
+stat("Ready – White to move");
+sync();
+draw()
+}
+
+$("pw").onchange=$("pb").onchange=reset;
+
+$("go").onclick=function(){
+if(over)reset();
+
+run=!run;
+sync();
+loop()
+};
+
+$("step").onclick=function(){
+run=0;
+sync();
+step()
+};
+
+$("rs").onclick=reset;
+
+opts("lead",0);
+opts("judge",0);
+opts("pw",0);
+opts("pb",1);
+
+boxes("tg",[0,1,2]);
+boxes("cg",[0,1]);
+
+reset();
+</script>
+</body>
+</html>
